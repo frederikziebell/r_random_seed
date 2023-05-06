@@ -23,7 +23,7 @@ all_packages <- rownames(avail_packages)
 with_progress({
   p <- progressor(along = all_packages)
  
-  seed_lines_cran <- future_lapply(all_packages[1:10], function(pkg) {
+  seed_lines_cran <- future_lapply(all_packages, function(pkg) {
     p()
    
     # download package
@@ -76,7 +76,7 @@ gz_files <- readLines(con = bioc_mirror) %>%
 with_progress({
   p <- progressor(along = all_packages)
  
-  seed_lines_bioc <- future_lapply(gz_files[1:10], function(file) {
+  seed_lines_bioc <- future_lapply(gz_files, function(file) {
     p()
    
   # download file
