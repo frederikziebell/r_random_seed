@@ -1,0 +1,121 @@
+# preparations
+
+```{r}
+library("progressr")
+library("future")
+library("future.apply")
+library("tidyverse")
+
+if( !dir.exists("pkgs") ){ dir.create("pkgs") }
+
+bioc_mirror <- "https://ftp.gwdg.de/pub/misc/bioconductor/packages/3.17/bioc/src/contrib/"
+cran_repo <- "https://cran.rstudio.com"
+
+plan("multisession", workers = 6)
+handlers("cli")
+```
+
+# CRAN
+```{r}
+avail_packages <- available.packages(repos = cran_repo)
+all_packages <- rownames(avail_packages)
+
+with_progress({
+  p <- progressor(along = all_packages)
+ 
+  seed_lines_cran <- future_lapply(all_packages[1:10], function(pkg) {
+    p()
+   
+    # download package
+    download.packages(pkg, destdir = "pkgs/", available = avail_packages,
+                             repos = cran_repo, method = "curl", quiet = T)
+   
+    # untar file
+    package_file <- list.files("pkgs", full.names = T) %>%
+      str_subset(str_c("^pkgs/", pkg,"_")) %>%
+      str_subset("tar\\.gz$")
+    untar(package_file, exdir = "pkgs/")
+   
+    # get all code lines containing 'seed'
+    seed_lines <- file.path("pkgs", pkg, "R") %>%
+      list.files(full.names = T) %>%
+      str_subset("(\\.R|\\.Rmd)$") %>%
+      map(read_lines) %>%
+      unlist() %>%
+      str_subset("seed")
+   
+    # delete package and folder
+    file.remove(package_file)
+    unlink(file.path("pkgs", pkg), recursive = T)
+   
+    if(!length(seed_lines)==0){
+      data.frame(
+        package = pkg,
+        type = "CRAN",
+        seed_line = seed_lines
+      )
+    } else {
+      NULL
+    }
+   
+  }) %>%
+    bind_rows()
+})
+ 
+saveRDS(seed_lines_cran, "seed_lines_cran.rds")
+```
+ 
+# Bioconductor
+```{r}
+ 
+gz_files <- readLines(con = bioc_mirror) %>%
+  str_subset("\\.tar\\.gz") %>%
+  str_extract(">.*\\.tar\\.gz") %>%
+  str_sub(start = 2)
+ 
+with_progress({
+  p <- progressor(along = all_packages)
+ 
+  seed_lines_bioc <- future_lapply(gz_files[1:10], function(file) {
+    p()
+   
+  # download file
+  download.file(str_c(bioc_mirror,"/",file), destfile = str_c("pkgs/",file), method = "curl", quiet = T)
+ 
+  # untar file
+  untar(str_c("pkgs/",file), exdir = "pkgs/")
+ 
+  package_name <- file %>%
+    str_extract("^.*_") %>%
+    str_sub(end = -2)
+ 
+  # get all code lines containing 'seed'
+  seed_lines <- package_name %>%
+    {file.path("pkgs", ., "R")} %>%
+    list.files(full.names = T) %>%
+    str_subset("(\\.R|\\.Rmd)$") %>%
+    map(read_lines) %>%
+    unlist() %>%
+    str_subset("seed")
+   
+    # delete package and folder
+    file.remove(str_c("pkgs/",file))
+    unlink(file.path("pkgs", package_name), recursive = T)
+   
+    if(!length(seed_lines)==0){
+      data.frame(
+        package = package_name,
+        type = "BioC",
+        seed_line = seed_lines
+      )
+    } else {
+      NULL
+    }
+   
+  }) %>%
+    bind_rows()
+})
+ 
+saveRDS(seed_lines_bioc, "seed_lines_bioc.rds")
+unlink("pkgs", recursive = T)
+```

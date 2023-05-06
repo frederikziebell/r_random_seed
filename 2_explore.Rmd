@@ -1,0 +1,215 @@
+# preparations
+
+```{r}
+
+library("cowplot")
+
+library("tidyverse")
+
+theme_set(theme_cowplot())
+
+```
+
+ 
+
+# load data
+
+```{r}
+
+seed_lines_cran <- readRDS("seed_lines_cran.rds")
+
+seed_lines_bioc <- readRDS("seed_lines_bioc.rds")
+
+```
+
+ 
+
+# extract seed numbers
+
+```{r}
+
+# extract all numbers that appear in set.seed() commands
+
+extract_set_seed_numbers <- function(strings){
+
+  strings %>%
+
+    str_extract_all("set.seed\\([:number:]+L?\\)") %>%
+
+    unlist() %>%
+
+    str_replace("set.seed\\(","") %>%
+
+    str_replace("\\)","") %>%
+
+    str_replace("L$","") %>%
+
+    as.numeric()
+
+}
+
+ 
+
+# extract all numbers where a variable ending in "seed" is
+
+# assigned a number
+
+extract_seed_assign_numbers <- function(strings){
+
+  strings %>%
+
+    str_extract_all("seed[:space:]*(<-|=)[:space:]*[:number:]+") %>%
+
+    unlist() %>%
+
+    str_extract("[:number:]+") %>%
+
+    as.numeric()
+
+}
+
+ 
+
+# wrapper around extract_set_seed_numbers and extract_seed_assign_numbers
+
+extract_seed_numbers <- function(strings){
+
+  res <- c(
+
+    extract_set_seed_numbers(strings),
+
+    extract_seed_assign_numbers(strings)
+
+  )
+
+  if(length(res)==0){
+
+    NA_real_
+
+  } else {
+
+    res
+
+  }
+
+}
+
+ 
+
+# extract seeds numbers for each package or
+
+# give NA if no seeds were found
+
+extract_seeds_per_package <- function(seed_lines){
+
+  seed_lines %>%
+
+    group_by(package) %>%
+
+    group_split() %>%
+
+    map(function(df){
+
+      data.frame(package = df$package[1], type = df$type[1], number = extract_seed_numbers(df$seed_line))
+
+    }, .progress = T) %>%
+
+    bind_rows()
+
+}
+
+ 
+
+seed_numbers <- bind_rows(
+
+  extract_seeds_per_package(seed_lines_cran),
+
+  extract_seeds_per_package(seed_lines_bioc)
+
+)
+
+ 
+
+ 
+
+ 
+
+ 
+
+```
+
+ 
+
+ 
+
+# distribution of seed numbers
+
+## all results
+
+```{r}
+
+ 
+
+ 
+
+seed_numbers %>%
+
+  filter(!is.na(number)) %>%
+
+  ggplot(aes(number, fill = type)) +
+
+    geom_histogram(aes(y=after_stat(density)), bins = 50, position = position_dodge()) +
+
+    scale_x_log10(breaks = 10^seq(0,10,2)) +
+
+    ggsci::scale_fill_jco() +
+
+    labs(x = "seed number")
+
+ 
+
+seed_numbers %>%
+
+  filter(!is.na(number)) %>%
+
+  ggplot(aes(log10(number+1), color = type)) +
+
+    stat_ecdf(size = 1) +
+
+    ggsci::scale_color_jco() +
+
+    scale_x_continuous(breaks = 0:10)
+
+ 
+
+fit <- lm(log2(1+number)~type, data=seed_numbers)
+
+summary(fit)
+
+```
+
+ 
+
+# top hits table
+
+```{r}
+
+ 
+
+c("CRAN","BioC") %>%
+
+  map_dfr(function(type_str){
+
+    seed_numbers$number[seed_numbers$type == type_str] %>%
+
+      table(useNA = "no") %>%
+
+      {data.frame(type = type_str, value = names(.), count = as.vector(.))}   
+
+  }) %>%
+
+  arrange(-count) %>%
+
+  slice_head(n = 10, by="type")
+
+```
